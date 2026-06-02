@@ -172,7 +172,9 @@ class AudioEngine {
 
     func getAllOutputDevices() -> [AudioDeviceInfo] {
         guard let ids = getDeviceIDs() else { return [] }
-        return ids.compactMap { getDeviceInfo(id: $0) }.filter { $0.hasOutput && !$0.name.isEmpty }
+        return ids.compactMap { getDeviceInfo(id: $0) }.filter {
+            $0.hasOutput && !$0.name.isEmpty && !$0.uid.hasPrefix("com.collabrium.audiomesh.")
+        }
     }
 
     private func getDeviceIDs() -> [AudioDeviceID]? {
@@ -291,19 +293,12 @@ class AudioEngine {
 
 enum AudioError: Error, LocalizedError {
     case invalidDevice
-    case noCommonSampleRate
-    case apiNotAvailable
     case setupFailed
-    case blackholeNotInstalled
 
     var errorDescription: String? {
         switch self {
         case .invalidDevice: return "Invalid or missing audio device"
-        case .noCommonSampleRate: return "No compatible sample rate found"
-        case .apiNotAvailable: return "CoreAudio API not available"
         case .setupFailed: return "Audio setup failed"
-        case .blackholeNotInstalled:
-            return "BlackHole not found. Install BlackHole from https://github.com/ExistentialAudio/BlackHole and ensure it's enabled in Audio MIDI Setup."
         }
     }
 }

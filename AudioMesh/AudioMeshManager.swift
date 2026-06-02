@@ -14,12 +14,14 @@ class AudioMeshManager: ObservableObject {
     @Published var statusMessage: String = "Ready"
     @Published var isError: Bool = false
     @Published var masterVolume: Float = 0.5
+    @Published var isMuted: Bool = false
 
     let engine = AudioEngine.shared
     private let defaults = UserDefaults.standard
     private let devVolsKey = "deviceVolumes"
     private let slotOrderKey = "slotOrder"
     private let masterVolKey = "masterVolume"
+    private var preMuteVolume: Float = 0.5
     private var devVols: [String: Float] = [:]
 
     init() {
@@ -110,6 +112,17 @@ class AudioMeshManager: ObservableObject {
         }
     }
 
+    func toggleMute() {
+        if isMuted {
+            isMuted = false
+            updateMasterVolume(preMuteVolume)
+        } else {
+            preMuteVolume = masterVolume
+            isMuted = true
+            updateMasterVolume(0)
+        }
+    }
+
     func updateMasterVolume(_ v: Float) {
         masterVolume = v
         for i in deviceSlots.indices {
@@ -156,15 +169,17 @@ class AudioMeshManager: ObservableObject {
     }
 
     private func loadSaved() {
-        // Restore per-device volumes
         let saved = defaults.dictionary(forKey: devVolsKey) as? [String: Double] ?? [:]
         devVols = saved.mapValues { Float($0) }
 
+        if defaults.object(forKey: masterVolKey) != nil {
+            let saved = Float(defaults.double(forKey: masterVolKey))
+            masterVolume = saved > 0 ? saved : 0.5
+        } else {
+            masterVolume = 0.5
+        }
+
         let savedUIDs = defaults.array(forKey: slotOrderKey) as? [String] ?? []
-        let savedMaster = defaults.double(forKey: masterVolKey)
-
-        masterVolume = savedMaster > 0 ? Float(savedMaster) : 0.5
-
         if savedUIDs.isEmpty {
             deviceSlots = [
                 DeviceSlot(id: UUID(), device: nil, volume: masterVolume),
@@ -173,7 +188,6 @@ class AudioMeshManager: ObservableObject {
             return
         }
 
-        // Restore slot order, looking up each device's saved volume
         deviceSlots = []
         for uid in savedUIDs where !uid.isEmpty {
             let device = availableDevices.first(where: { $0.uid == uid })
@@ -185,7 +199,6 @@ class AudioMeshManager: ObservableObject {
         }
     }
 
-    /// Called when a slot's device selection changes — adopts the device's saved volume
     func selectDeviceForSlot(at index: Int, device: AudioDeviceInfo?) {
         guard index < deviceSlots.count else { return }
         deviceSlots[index].device = device
