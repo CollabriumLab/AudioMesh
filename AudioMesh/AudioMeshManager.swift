@@ -250,7 +250,7 @@ final class AudioMeshManager {
         let uids = deviceSlots.map { $0.device?.uid ?? "" }
         defaults.set(uids, forKey: slotOrderKey)
 
-        defaults.set(Double(masterVolume), forKey: masterVolKey)
+        defaults.set(Double(isDucking ? preDuckVolume : masterVolume), forKey: masterVolKey)
         defaults.set(duckingEnabled, forKey: duckEnabledKey)
         defaults.set(Double(duckLevel), forKey: duckLevelKey)
         defaults.set(duckDuration, forKey: duckDurationKey)

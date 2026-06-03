@@ -300,10 +300,10 @@ private struct MenuBarContentView: View {
                     .font(.caption.weight(.semibold))
                 Spacer()
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(manager.isActive || canSync ? .white : .white.opacity(0.45))
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(manager.isActive ? Color.red : Color.blue.opacity(canSync ? 1 : 0.45))
+            .background(manager.isActive ? Color.red : Color.blue.opacity(canSync || manager.isActive ? 1 : 0.45))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
