@@ -62,7 +62,8 @@ final class AudioMeshManager {
     }
 
     func removeSlot(at index: Int) {
-        guard deviceSlots.count > 2, index < deviceSlots.count else { return }
+        guard index < deviceSlots.count else { return }
+        if isActive { stop() }
         deviceSlots.remove(at: index)
     }
 

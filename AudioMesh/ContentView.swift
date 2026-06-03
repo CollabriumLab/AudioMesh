@@ -2,23 +2,29 @@ import SwiftUI
 
 // MARK: - Constants
 
-private let bg = Color(red: 0.063, green: 0.078, blue: 0.102)
-private let hoverBg = Color(red: 0.15, green: 0.16, blue: 0.18)
+private let bg = LinearGradient(
+    stops: [
+        .init(color: Color(red: 0.14, green: 0.07, blue: 0.17), location: 0),
+        .init(color: Color(red: 0.07, green: 0.06, blue: 0.12), location: 0.45),
+        .init(color: Color(red: 0.04, green: 0.05, blue: 0.09), location: 1),
+    ],
+    startPoint: .topLeading,
+    endPoint: .bottomTrailing
+)
 private let accent = Color.blue
-private let secondary = Color.white.opacity(0.5)
-private let divider = Color.white.opacity(0.06)
 private let red = Color(red: 1.0, green: 0.23, blue: 0.19)
-private let controlFill = Color.white.opacity(0.055)
+private let glassText = Color.white.opacity(0.7)
+let glassSecondary = Color.white.opacity(0.45)
+private let secondary = glassSecondary
 
 // MARK: - Content View
 
 struct ContentView: View {
     @Environment(AudioMeshManager.self) private var manager
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 HeaderView()
 
                 if !manager.deviceSlots.isEmpty {
@@ -38,7 +44,7 @@ struct ContentView: View {
 
                 PresetsSection()
 
-                Divider().overlay(Color.white.opacity(0.06))
+                GlassDivider()
 
                 StatusBarView()
             }
@@ -53,20 +59,11 @@ struct ContentView: View {
             ForEach(Array(manager.deviceSlots.enumerated()), id: \.element.id) { i, _ in
                 DeviceRow(index: i)
                 if i < manager.deviceSlots.count - 1 {
-                    Divider().overlay(Color.white.opacity(0.04))
+                    GlassDivider()
                 }
             }
         }
-        .background(
-            VisualEffectView(material: .sidebar, blendingMode: .withinWindow)
-                .overlay(Color.white.opacity(0.04))
-        )
-        .compositingGroup()
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.white.opacity(0.06))
-        )
+        .glassContainer()
     }
 }
 
@@ -92,38 +89,34 @@ struct MeshVolumeControl: View {
         HStack(spacing: isCompact ? 8 : 10) {
             if let onMuteToggle {
                 Button(action: {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        onMuteToggle()
-                    }
+                    withAnimation(glassSpringFast) { onMuteToggle() }
                 }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: isCompact ? 6 : 7)
-                            .fill(isMuted ? red.opacity(0.18) : controlFill)
+                            .fill(isMuted ? red.opacity(0.18) : .white.opacity(0.055))
                         Image(systemName: isMuted ? "speaker.slash.fill" : icon)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(isMuted ? red : secondary)
+                            .foregroundStyle(isMuted ? red : glassSecondary)
                             .contentTransition(.symbolEffect(.replace))
                     }
                     .frame(width: isCompact ? 24 : 28, height: isCompact ? 22 : 26)
                     .overlay(
                         RoundedRectangle(cornerRadius: isCompact ? 6 : 7)
-                            .strokeBorder(isMuted ? red.opacity(0.28) : Color.white.opacity(0.06))
+                            .strokeBorder(isMuted ? red.opacity(0.28) : .white.opacity(0.06))
                     )
                 }
                 .buttonStyle(.plain)
+                .glassButtonPress()
                 .help(isMuted ? "Unmute" : "Mute")
             } else {
                 Image(systemName: icon)
                     .font(.caption)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
                     .frame(width: isCompact ? 14 : 16)
             }
 
             Slider(
-                value: Binding(
-                    get: { value },
-                    set: onChange
-                ),
+                value: Binding(get: { value }, set: onChange),
                 in: 0...1
             )
             .controlSize(controlSize)
@@ -132,7 +125,7 @@ struct MeshVolumeControl: View {
 
             Text(percentText)
                 .font((isCompact ? Font.caption2 : Font.caption).monospacedDigit())
-                .foregroundStyle(isMuted ? red : secondary)
+                .foregroundStyle(isMuted ? red : glassSecondary)
                 .frame(width: isCompact ? 44 : 48, alignment: .trailing)
                 .lineLimit(1)
         }
@@ -145,7 +138,6 @@ struct DeviceRow: View {
     @Environment(AudioMeshManager.self) private var manager
     let index: Int
     @State private var isHovered = false
-    @State private var hoverRemove = false
     @State private var showLatency = false
 
     private var slot: DeviceSlot? {
@@ -166,15 +158,16 @@ struct DeviceRow: View {
                 Image(systemName: "headphones")
                     .font(.title3)
                     .foregroundStyle(slot?.device != nil ? .white : .white.opacity(0.25))
-                    .frame(width: 40, height: 40)
-                    .background(controlFill)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(width: 36, height: 36)
+                    .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Menu {
                         ForEach(availableDevices()) { device in
                             Button {
-                                manager.selectDeviceForSlot(at: index, device: device)
+                                withAnimation(glassSpringFast) {
+                                    manager.selectDeviceForSlot(at: index, device: device)
+                                }
                             } label: {
                                 HStack(spacing: 6) {
                                     Text(device.name)
@@ -190,18 +183,20 @@ struct DeviceRow: View {
                         if slot?.device != nil {
                             Divider()
                             Button("Remove Device") {
-                                manager.selectDeviceForSlot(at: index, device: nil)
+                                withAnimation(glassSpringFast) {
+                                    manager.removeSlot(at: index)
+                                }
                             }
                         }
                     } label: {
                         HStack(spacing: 4) {
                             Text(slot?.device?.name ?? "Select Audio Device")
                                 .font(.body.weight(.medium))
-                                .foregroundStyle(slot?.device != nil ? .white : secondary)
+                                .foregroundStyle(slot?.device != nil ? .white : glassSecondary)
                                 .lineLimit(1)
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(secondary)
+                                .foregroundStyle(glassSecondary)
                         }
                     }
                     .menuStyle(.borderlessButton)
@@ -210,7 +205,7 @@ struct DeviceRow: View {
                     if slot?.device != nil {
                         Text(connectionSummary)
                             .font(.caption)
-                            .foregroundStyle(secondary)
+                            .foregroundStyle(glassSecondary)
                     }
                 }
 
@@ -224,25 +219,25 @@ struct DeviceRow: View {
                             } else {
                                 Text(device.isBluetooth ? "BT" : "OUT")
                                     .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(secondary)
+                                    .foregroundStyle(glassSecondary)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 3)
-                                    .background(controlFill, in: RoundedRectangle(cornerRadius: 6))
+                                    .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
                             }
                         }
 
-                        if !manager.isActive && manager.deviceSlots.count > 2 {
-                            Button {
+                        Button {
+                            withAnimation(glassSpringFast) {
                                 manager.removeSlot(at: index)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(.white.opacity(hoverRemove ? 0.7 : 0.35))
                             }
-                            .buttonStyle(.plain)
-                            .help("Remove slot")
-                            .onHover { h in hoverRemove = h }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(.white.opacity(isHovered ? 0.6 : 0.3))
                         }
+                        .buttonStyle(.plain)
+                        .glassButtonPress()
+                        .help("Remove slot")
                     }
                 }
             }
@@ -263,29 +258,28 @@ struct DeviceRow: View {
                 .padding(.leading, 52)
                 .transition(.opacity.combined(with: .move(edge: .top)))
 
-                // Latency offset: collapsible (wired devices only)
                 if let device = slot?.device, !device.isBluetooth {
                     Button {
-                        withAnimation(.easeOut(duration: 0.15)) { showLatency.toggle() }
+                        withAnimation(glassSpring) { showLatency.toggle() }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "clock")
                                 .font(.caption)
-                                .foregroundStyle(secondary)
+                                .foregroundStyle(glassSecondary)
                             Text("Latency")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(secondary)
+                                .foregroundStyle(glassSecondary)
                             Spacer()
                             Text(slot.map { $0.latencyOffset >= 0 ? "+\($0.latencyOffset)" : "\($0.latencyOffset)" } ?? "0")
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(slot?.latencyOffset == 0 ? secondary : .white)
+                                .foregroundStyle(slot?.latencyOffset == 0 ? glassSecondary : .white)
                                 .frame(minWidth: 32, alignment: .trailing)
                             Text("ms")
                                 .font(.caption2)
-                                .foregroundStyle(secondary)
+                                .foregroundStyle(glassSecondary)
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(secondary)
+                                .foregroundStyle(glassSecondary)
                                 .rotationEffect(.degrees(showLatency ? 0 : -90))
                         }
                     }
@@ -296,74 +290,74 @@ struct DeviceRow: View {
 
                     if showLatency {
                         HStack(spacing: 8) {
-                        Button {
-                            let cur = slot?.latencyOffset ?? 0
-                            let new = max(cur - 50, -1000)
-                            if index < manager.deviceSlots.count {
-                                manager.deviceSlots[index].latencyOffset = new
-                                if let uid = manager.deviceSlots[index].device?.uid {
-                                    manager.latencyOffsets[uid] = new
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "minus")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(secondary)
-                                .frame(width: 22, height: 22)
-                                .background(controlFill)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .help("–50 ms")
-
-                        Slider(
-                            value: Binding(
-                                get: { Double(slot?.latencyOffset ?? 0) },
-                                set: { newValue in
-                                    let rounded = Int(newValue.rounded())
-                                    if index < manager.deviceSlots.count {
-                                        manager.deviceSlots[index].latencyOffset = rounded
-                                        if let uid = manager.deviceSlots[index].device?.uid {
-                                            manager.latencyOffsets[uid] = rounded
-                                        }
+                            Button {
+                                let cur = slot?.latencyOffset ?? 0
+                                let new = max(cur - 50, -1000)
+                                if index < manager.deviceSlots.count {
+                                    manager.deviceSlots[index].latencyOffset = new
+                                    if let uid = manager.deviceSlots[index].device?.uid {
+                                        manager.latencyOffsets[uid] = new
                                     }
                                 }
-                            ),
-                            in: -1000...1000,
-                            step: 10
-                        )
-                        .controlSize(.small)
-
-                        Button {
-                            let cur = slot?.latencyOffset ?? 0
-                            let new = min(cur + 50, 1000)
-                            if index < manager.deviceSlots.count {
-                                manager.deviceSlots[index].latencyOffset = new
-                                if let uid = manager.deviceSlots[index].device?.uid {
-                                    manager.latencyOffsets[uid] = new
-                                }
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(glassSecondary)
+                                    .frame(width: 22, height: 22)
+                                    .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
                             }
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(secondary)
-                                .frame(width: 22, height: 22)
-                                .background(controlFill)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .buttonStyle(.plain)
+                            .glassButtonPress()
+                            .help("–50 ms")
+
+                            Slider(
+                                value: Binding(
+                                    get: { Double(slot?.latencyOffset ?? 0) },
+                                    set: { newValue in
+                                        let rounded = Int(newValue.rounded())
+                                        if index < manager.deviceSlots.count {
+                                            manager.deviceSlots[index].latencyOffset = rounded
+                                            if let uid = manager.deviceSlots[index].device?.uid {
+                                                manager.latencyOffsets[uid] = rounded
+                                            }
+                                        }
+                                    }
+                                ),
+                                in: -1000...1000,
+                                step: 10
+                            )
+                            .controlSize(.small)
+
+                            Button {
+                                let cur = slot?.latencyOffset ?? 0
+                                let new = min(cur + 50, 1000)
+                                if index < manager.deviceSlots.count {
+                                    manager.deviceSlots[index].latencyOffset = new
+                                    if let uid = manager.deviceSlots[index].device?.uid {
+                                        manager.latencyOffsets[uid] = new
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(glassSecondary)
+                                    .frame(width: 22, height: 22)
+                                    .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .glassButtonPress()
+                            .help("+50 ms")
                         }
-                        .buttonStyle(.plain)
-                        .help("+50 ms")
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 14)
+                        .padding(.leading, 52)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 14)
-                    .padding(.leading, 52)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
                 }
             }
         }
-        .background(isHovered ? hoverBg : Color.clear)
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .background(isHovered ? .white.opacity(0.04) : Color.clear)
+        .animation(glassEaseOut, value: isHovered)
         .onHover { h in isHovered = h }
     }
 
@@ -397,7 +391,7 @@ struct AddDeviceRow: View {
                         .foregroundStyle(.white.opacity(isHovered ? 0.9 : 0.7))
                     Text("Pair headphones, speakers, or phones")
                         .font(.caption)
-                        .foregroundStyle(secondary)
+                        .foregroundStyle(glassSecondary)
                 }
 
                 Spacer()
@@ -405,18 +399,19 @@ struct AddDeviceRow: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(
-                VisualEffectView(material: .sidebar, blendingMode: .withinWindow)
-                    .overlay(Color.white.opacity(isHovered ? 0.08 : 0.04))
+                VisualEffectView(material: .hudWindow, blendingMode: .withinWindow)
+                    .overlay(.white.opacity(isHovered ? 0.08 : 0.03))
             )
         }
         .buttonStyle(.plain)
         .compositingGroup()
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.white.opacity(isHovered ? 0.12 : 0.06), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(isHovered ? 0.15 : 0.06), style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
         )
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .scaleEffect(isHovered ? 1.01 : 1)
+        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
         .onHover { h in isHovered = h }
     }
 }
@@ -443,22 +438,12 @@ struct SyncSection: View {
                     Text(manager.isActive ? "Stop" : "Sync Devices")
                         .font(.body.weight(.semibold))
                 }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                    manager.isActive
-                        ? red
-                        : accent.opacity(canSync ? 1 : 0.3)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .buttonStyle(.plain)
-            .animation(.easeOut(duration: 0.15), value: manager.isActive)
+            .buttonStyle(GlassButtonStyle(tint: manager.isActive ? red : accent, isActive: manager.isActive))
 
             Text("Synchronize audio playback across all connected outputs")
                 .font(.caption)
-                .foregroundStyle(secondary)
+                .foregroundStyle(glassSecondary)
                 .frame(maxWidth: .infinity)
         }
     }
@@ -471,17 +456,7 @@ struct MasterVolumeSection: View {
 
     var body: some View {
         VStack(spacing: 9) {
-            HStack(spacing: 6) {
-                Image(systemName: "speaker.wave.3")
-                    .font(.caption)
-                    .foregroundStyle(secondary)
-                Text("Master Volume")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
+            GlassSectionHeader(icon: "speaker.wave.3", title: "Master Volume")
 
             MeshVolumeControl(
                 icon: "speaker.wave.3.fill",
@@ -500,13 +475,8 @@ struct MasterVolumeSection: View {
             .padding(.leading, 26)
             .padding(.bottom, 14)
         }
-        .background(
-            VisualEffectView(material: .sidebar, blendingMode: .withinWindow)
-                .overlay(Color.white.opacity(0.04))
-        )
-        .compositingGroup()
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .animation(.easeOut(duration: 0.2), value: manager.isMuted)
+        .glassContainer()
+        .animation(glassSpring, value: manager.isMuted)
     }
 }
 
@@ -517,73 +487,78 @@ struct DuckingSection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            duckingHeader
+            HStack(spacing: 6) {
+                Image(systemName: manager.isDucking ? "speaker.wave.2.bubble.fill" : "speaker.wave.2")
+                    .font(.caption)
+                    .foregroundStyle(manager.isDucking ? .orange : .white.opacity(0.5))
+
+                Text("Audio Ducking")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Spacer()
+
+                Toggle(isOn: Bindable(manager).duckingEnabled) {
+                    Text(manager.duckingEnabled ? "On" : "Off")
+                        .font(.caption2)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
             if manager.duckingEnabled {
                 duckingControls
             }
         }
-        .background(
-            VisualEffectView(material: .sidebar, blendingMode: .withinWindow)
-                .overlay { Color.white.opacity(0.04) }
-        )
-        .compositingGroup()
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color(white: 1, opacity: 0.06))
-        )
-        .animation(.easeOut(duration: 0.2), value: manager.duckingEnabled)
-    }
-
-    private var duckingHeader: some View {
-        HStack {
-            Image(systemName: manager.isDucking ? "speaker.wave.2.bubble.fill" : "speaker.wave.2")
-                .font(.caption)
-                .foregroundStyle(manager.isDucking ? .orange : secondary)
-            Text("Audio Ducking")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(secondary)
-            Spacer()
-
-            Toggle(isOn: Bindable(manager).duckingEnabled) {
-                Text(manager.duckingEnabled ? "On" : "Off")
-                    .font(.caption2)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .glassContainer()
+        .animation(glassSpring, value: manager.duckingEnabled)
     }
 
     private var duckingControls: some View {
         VStack(spacing: 12) {
-            Divider().overlay(Color.white.opacity(0.06))
-            duckLevelRow
+            GlassDivider()
+
+            GlassSliderRow(
+                label: "Duck level",
+                value: Bindable(manager).duckLevel,
+                format: "\(Int(round(manager.duckLevel * 100)))%",
+                range: 0.05...1,
+                tint: .orange
+            )
+
             autoDetectRow
-            duckDurationRow
-            duckButton
+
+            GlassSliderRow(
+                label: "Restore in",
+                value: Binding(
+                    get: { Float(manager.duckDuration) },
+                    set: { manager.duckDuration = Double($0) }
+                ),
+                format: "\(Int(manager.duckDuration))s",
+                range: 1...10,
+                tint: .orange
+            )
+
+            Button(action: { manager.isDucking ? manager.stopDucking() : manager.startDucking() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: manager.isDucking ? "arrow.uturn.backward" : "speaker.wave.2.bubble.fill")
+                        .font(.caption)
+                    Text(manager.isDucking ? "Restore Volume" : "Duck Now")
+                        .font(.caption.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(manager.isDucking ? Color.orange : .white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .glassButtonPress()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .transition(.opacity)
-    }
-
-    private var duckLevelRow: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text("Duck level")
-                    .font(.caption)
-                    .foregroundStyle(secondary)
-                Spacer()
-                Text("\(Int(round(manager.duckLevel * 100)))%")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(secondary)
-            }
-            Slider(value: Bindable(manager).duckLevel, in: 0.05...1)
-                .controlSize(.small)
-                .tint(.orange)
-        }
     }
 
     private var autoDetectRow: some View {
@@ -591,7 +566,7 @@ struct DuckingSection: View {
             Toggle(isOn: Bindable(manager).autoDuckingEnabled) {
                 Text("Auto-detect alerts")
                     .font(.caption)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
             }
             .toggleStyle(.switch)
             .controlSize(.mini)
@@ -601,45 +576,9 @@ struct DuckingSection: View {
             if manager.autoDuckingEnabled {
                 Text("Restore in \(Int(manager.duckDuration))s")
                     .font(.caption2)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
             }
         }
-    }
-
-    private var duckDurationRow: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text("Restore in")
-                    .font(.caption)
-                    .foregroundStyle(secondary)
-                Spacer()
-                Text("\(Int(manager.duckDuration))s")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(secondary)
-            }
-            Slider(value: Binding(
-                get: { Float(manager.duckDuration) },
-                set: { manager.duckDuration = Double($0) }
-            ), in: 1...10)
-                .controlSize(.small)
-                .tint(.orange)
-        }
-    }
-
-    private var duckButton: some View {
-        Button(action: { manager.isDucking ? manager.stopDucking() : manager.startDucking() }) {
-            HStack(spacing: 6) {
-                Image(systemName: manager.isDucking ? "arrow.uturn.backward" : "speaker.wave.2.bubble.fill")
-                    .font(.caption)
-                Text(manager.isDucking ? "Restore Volume" : "Duck Now")
-                    .font(.caption.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(manager.isDucking ? Color.orange : Color.white.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -655,31 +594,31 @@ private struct HeaderView: View {
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             Image(systemName: manager.isActive ? "waveform.circle.fill" : "waveform.circle")
-                .font(.system(size: 40, weight: .regular))
-                .foregroundStyle(manager.isActive ? accent : .white.opacity(0.55))
+                .font(.system(size: 36, weight: .regular))
+                .foregroundStyle(manager.isActive ? accent : .white.opacity(0.5))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("AudioMesh")
-                    .font(.largeTitle.weight(.semibold))
+                    .font(.title.weight(.semibold))
                     .foregroundStyle(.white)
                 Text("Route Mac audio to multiple outputs")
                     .font(.subheadline)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
             }
 
             Spacer()
 
             HStack(spacing: 8) {
                 Circle()
-                    .fill(manager.isActive ? Color.green : Color.white.opacity(0.28))
+                    .fill(manager.isActive ? Color.green : .white.opacity(0.25))
                     .frame(width: 7, height: 7)
                 Text(manager.isActive ? "Syncing" : "\(connectedCount) connected")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(manager.isActive ? .white : secondary)
+                    .foregroundStyle(manager.isActive ? .white : glassSecondary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(controlFill, in: Capsule())
+            .background(.white.opacity(0.055), in: Capsule())
         }
     }
 }
@@ -695,14 +634,15 @@ private struct StatusBarView: View {
 
             Group {
                 Text("\(count) Device\(count != 1 ? "s" : "") Connected")
-                Text("  ·  ").foregroundStyle(secondary)
+                Text("  ·  ").foregroundStyle(glassSecondary)
                 Text(manager.statusMessage)
             }
             .font(.caption)
-            .foregroundStyle(secondary)
+            .foregroundStyle(glassSecondary)
 
             Spacer()
         }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -717,10 +657,10 @@ struct PresetsSection: View {
             HStack {
                 Image(systemName: "square.on.square")
                     .font(.caption)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
                 Text("Presets")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
                 Spacer()
 
                 Button {
@@ -730,6 +670,7 @@ struct PresetsSection: View {
                         .font(.body)
                 }
                 .buttonStyle(.plain)
+                .glassButtonPress()
                 .help("Save current layout as preset")
                 .disabled(manager.deviceSlots.compactMap(\.device).count < 2)
                 .opacity(manager.deviceSlots.compactMap(\.device).count < 2 ? 0.3 : 1)
@@ -738,68 +679,62 @@ struct PresetsSection: View {
             if manager.presetManager.presets.isEmpty {
                 Text("Save device combinations for quick switching")
                     .font(.caption)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
                     .padding(.vertical, 4)
             } else {
                 ForEach(manager.presetManager.presets) { preset in
                     HStack(spacing: 8) {
                         Image(systemName: preset.autoSync ? "play.circle.fill" : "square.on.square")
                             .font(.body)
-                            .foregroundStyle(preset.autoSync ? .green : .secondary)
+                            .foregroundStyle(preset.autoSync ? .green : glassSecondary)
 
                         Text(preset.name)
                             .font(.caption.weight(.medium))
+                            .foregroundStyle(glassText)
                             .lineLimit(1)
 
                         Spacer()
 
                         Text("\(preset.deviceUIDs.count) devices")
                             .font(.caption2)
-                            .foregroundStyle(secondary)
+                            .foregroundStyle(glassSecondary)
 
                         Button {
-                            manager.applyPreset(preset)
+                            withAnimation(glassSpringFast) { manager.applyPreset(preset) }
                         } label: {
                             Image(systemName: "arrow.right.circle.fill")
                                 .font(.body)
                                 .foregroundStyle(accent)
                         }
                         .buttonStyle(.plain)
+                        .glassButtonPress()
                         .help("Apply preset")
 
                         Button {
-                            manager.presetManager.delete(preset)
+                            withAnimation(glassSpringFast) { manager.presetManager.delete(preset) }
                         } label: {
                             Image(systemName: "trash.circle.fill")
                                 .font(.body)
                                 .foregroundStyle(.red.opacity(0.5))
                         }
                         .buttonStyle(.plain)
+                        .glassButtonPress()
                         .help("Delete preset")
                     }
                     .padding(.vertical, 4)
                     .padding(.horizontal, 6)
-                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
 
             if manager.presetManager.presets.contains(where: { $0.autoSync }) {
                 Text("Auto-sync presets activate when all devices connect")
                     .font(.caption2)
-                    .foregroundStyle(secondary)
+                    .foregroundStyle(glassSecondary)
             }
         }
         .padding(12)
-        .background(
-            VisualEffectView(material: .sidebar, blendingMode: .withinWindow)
-                .overlay(Color.white.opacity(0.04))
-        )
-        .compositingGroup()
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.white.opacity(0.06))
-        )
+        .glassContainer()
         .sheet(isPresented: $showSaveSheet) {
             SavePresetSheet(showSaveSheet: $showSaveSheet)
                 .environment(manager)
@@ -867,7 +802,7 @@ struct BatteryBadge: View {
                 if l >= 25 { return "battery.50" }
                 return "battery.25"
             }()
-            let color: Color = l >= 25 ? .secondary : .red
+            let color: Color = l >= 25 ? glassSecondary : .red
 
             HStack(spacing: 4) {
                 Image(systemName: icon)
@@ -879,7 +814,7 @@ struct BatteryBadge: View {
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(controlFill, in: RoundedRectangle(cornerRadius: 6))
+            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 6))
             .help(info.helpText)
         }
     }

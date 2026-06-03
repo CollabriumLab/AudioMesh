@@ -8,7 +8,16 @@ struct AudioMeshApp: App {
         WindowGroup("AudioMesh", id: "main") {
             ContentView()
                 .environment(manager)
-                .onAppear { NSWindow.allowsAutomaticWindowTabbing = false }
+                .onAppear {
+                    NSWindow.allowsAutomaticWindowTabbing = false
+                    if let window = NSApplication.shared.windows.first {
+                        window.titlebarAppearsTransparent = true
+                        window.titleVisibility = .hidden
+                        window.styleMask.insert(.fullSizeContentView)
+                        window.isMovableByWindowBackground = true
+                        window.backgroundColor = .clear
+                    }
+                }
         }
         .windowResizability(.contentSize)
 
@@ -54,8 +63,7 @@ private struct MenuBarContentView: View {
 
             syncRow
 
-            Divider()
-                .overlay(Color.white.opacity(0.08))
+            GlassDivider()
 
             HStack(spacing: 8) {
                 Button {
@@ -64,6 +72,7 @@ private struct MenuBarContentView: View {
                 } label: {
                     Label("Open", systemImage: "macwindow")
                 }
+                .glassButtonPress()
 
                 Spacer()
 
@@ -74,16 +83,14 @@ private struct MenuBarContentView: View {
                     Label("Quit", systemImage: "power")
                 }
                 .keyboardShortcut("q")
+                .glassButtonPress()
             }
             .font(.caption)
             .buttonStyle(.borderless)
         }
         .padding(12)
         .frame(width: 318)
-        .background(
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .ignoresSafeArea()
-        )
+        .background(GlassMenuBarBackground())
     }
 
     // MARK: Header
@@ -92,14 +99,14 @@ private struct MenuBarContentView: View {
         HStack(spacing: 10) {
             Image(systemName: manager.isActive ? "waveform.circle.fill" : "waveform.circle")
                 .font(.title3)
-                .foregroundStyle(manager.isActive ? .blue : .secondary)
+                .foregroundStyle(manager.isActive ? .blue : glassSecondary)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("AudioMesh")
                     .font(.subheadline.weight(.semibold))
                 Text(manager.isActive ? manager.statusMessage : "\(connectedCount) of \(manager.deviceSlots.count) outputs ready")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(glassSecondary)
                     .lineLimit(1)
             }
 
@@ -107,10 +114,10 @@ private struct MenuBarContentView: View {
 
             Text(manager.isActive ? "Live" : "Idle")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(manager.isActive ? .green : .secondary)
+                .foregroundStyle(manager.isActive ? .green : glassSecondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.white.opacity(0.07), in: Capsule())
+                .background(.white.opacity(0.07), in: Capsule())
         }
         .padding(.bottom, 2)
     }
@@ -125,7 +132,7 @@ private struct MenuBarContentView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "headphones")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(glassSecondary)
                                 .frame(width: 14)
                             Text(device.name)
                                 .font(.caption)
@@ -138,7 +145,7 @@ private struct MenuBarContentView: View {
                             Spacer()
                             Text("\(Int(round(slot.volume * 100)))%")
                                 .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(glassSecondary)
                         }
 
                         MeshVolumeControl(
@@ -151,7 +158,7 @@ private struct MenuBarContentView: View {
                         )
                     }
                     .padding(9)
-                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+                    .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
@@ -169,7 +176,7 @@ private struct MenuBarContentView: View {
                 if l >= 25 { return "battery.50" }
                 return "battery.25"
             }()
-            let color: Color = l >= 25 ? .secondary : .red
+            let color: Color = l >= 25 ? glassSecondary : .red
 
             HStack(spacing: 3) {
                 Image(systemName: icon)
@@ -187,16 +194,16 @@ private struct MenuBarContentView: View {
         HStack(spacing: 9) {
             Image(systemName: "headphones")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(glassSecondary)
                 .frame(width: 18)
             Text("Choose at least two outputs in the app window.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(glassSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Master Volume
@@ -206,7 +213,7 @@ private struct MenuBarContentView: View {
             HStack {
                 Image(systemName: "speaker.wave.3")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(glassSecondary)
                     .frame(width: 14)
                 Text("Master")
                     .font(.caption)
@@ -215,7 +222,7 @@ private struct MenuBarContentView: View {
 
                 Text(manager.isMuted ? "Muted" : "\(Int(round(manager.masterVolume * 100)))%")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(manager.isMuted ? .red : .secondary)
+                    .foregroundStyle(manager.isMuted ? .red : glassSecondary)
             }
 
             MeshVolumeControl(
@@ -235,7 +242,7 @@ private struct MenuBarContentView: View {
             )
         }
         .padding(9)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Duck Row
@@ -244,7 +251,7 @@ private struct MenuBarContentView: View {
         HStack(spacing: 6) {
             Image(systemName: manager.isDucking ? "speaker.wave.2.bubble.fill" : "speaker.wave.2")
                 .font(.caption2)
-                .foregroundStyle(manager.isDucking ? .orange : .secondary)
+                .foregroundStyle(manager.isDucking ? .orange : glassSecondary)
                 .frame(width: 14)
 
             Toggle(isOn: Bindable(manager).duckingEnabled) {
@@ -255,7 +262,7 @@ private struct MenuBarContentView: View {
 
             Text("Ducking")
                 .font(.caption)
-                .foregroundStyle(manager.duckingEnabled ? .white : .secondary)
+                .foregroundStyle(manager.duckingEnabled ? .white : glassSecondary)
 
             Spacer()
 
@@ -270,12 +277,12 @@ private struct MenuBarContentView: View {
 
                 Text("\(Int(round(manager.duckLevel * 100)))%")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(glassSecondary)
                     .frame(width: 28, alignment: .trailing)
             }
         }
         .padding(9)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Sync
@@ -300,5 +307,6 @@ private struct MenuBarContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .glassButtonPress()
     }
 }
