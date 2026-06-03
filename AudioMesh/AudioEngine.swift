@@ -105,20 +105,27 @@ class AudioEngine {
         debugLog("Stopping graph, deviceID=\(multiDeviceID)")
 
         let origID = originalDefaultDeviceID
+        let devID = multiDeviceID
 
-        // Destroy the aggregate device first so CoreAudio reverts routing
-        AudioHardwareDestroyAggregateDevice(multiDeviceID)
-        debugLog("Multi-output device destroyed")
-
-        // Now restore original default output
-        if let id = origID {
-            Thread.sleep(forTimeInterval: 0.2)
-            _ = setSystemDefaultOutput(deviceID: id)
-        }
         multiDeviceID = 0
         multiDeviceUID = nil
         originalDefaultDeviceID = nil
         subDeviceIDs = []
+
+        // Destroy the aggregate device first so CoreAudio reverts routing
+        AudioHardwareDestroyAggregateDevice(devID)
+        debugLog("Multi-output device destroyed")
+
+        // Restore original default output on a background queue so the main
+        // thread is not blocked by the settle delay.
+        if let id = origID {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                Thread.sleep(forTimeInterval: 0.2)
+                DispatchQueue.main.async {
+                    _ = self?.setSystemDefaultOutput(deviceID: id)
+                }
+            }
+        }
     }
 
     private func destroyStaleDevice() {
@@ -272,6 +279,69 @@ class AudioEngine {
         return status == noErr ? id : nil
     }
 
+    // MARK: - Alert Device Monitoring (for ducking)
+
+    var onAlertDeviceActivityChanged: ((Bool) -> Void)?
+    private var alertListenerBlock: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void)?
+
+    func startAlertMonitoring() {
+        let alertID = getSystemAlertDevice()
+        guard alertID != 0 else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let block: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void) = { [weak self] _, _ in
+            guard let self else { return }
+            let running = self.isAlertDeviceRunning()
+            DispatchQueue.main.async { self.onAlertDeviceActivityChanged?(running) }
+        }
+        alertListenerBlock = block
+        AudioObjectAddPropertyListenerBlock(alertID, &address, .main, block)
+    }
+
+    func stopAlertMonitoring() {
+        guard let block = alertListenerBlock else { return }
+        let alertID = getSystemAlertDevice()
+        guard alertID != 0 else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(alertID, &address, .main, block)
+        alertListenerBlock = nil
+    }
+
+    private func getSystemAlertDevice() -> AudioDeviceID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var id: AudioDeviceID = 0
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(sysObject, &address, 0, nil, &size, &id)
+        return status == noErr ? id : 0
+    }
+
+    private func isAlertDeviceRunning() -> Bool {
+        let alertID = getSystemAlertDevice()
+        guard alertID != 0 else { return false }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var running: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(alertID, &address, 0, nil, &size, &running)
+        return status == noErr && running != 0
+    }
+
     // MARK: - Monitoring
 
     func startMonitoring() {
@@ -281,6 +351,8 @@ class AudioEngine {
         }
         listenerBlock = block
         AudioObjectAddPropertyListenerBlock(sysObject, &address, .main, block)
+
+        startAlertMonitoring()
     }
 
     func stopMonitoring() {
@@ -288,6 +360,8 @@ class AudioEngine {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         AudioObjectRemovePropertyListenerBlock(sysObject, &address, .main, block)
         listenerBlock = nil
+
+        stopAlertMonitoring()
     }
 }
 

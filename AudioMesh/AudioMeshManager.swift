@@ -1,43 +1,64 @@
 import SwiftUI
-import Combine
+import CoreAudio
 
 struct DeviceSlot: Identifiable {
     let id: UUID
     var device: AudioDeviceInfo?
     var volume: Float
+    var latencyOffset: Int // milliseconds, -1000 to +1000
 }
 
-class AudioMeshManager: ObservableObject {
-    @Published var availableDevices: [AudioDeviceInfo] = []
-    @Published var deviceSlots: [DeviceSlot] = []
-    @Published var isActive: Bool = false
-    @Published var statusMessage: String = "Ready"
-    @Published var isError: Bool = false
-    @Published var masterVolume: Float = 0.5
-    @Published var isMuted: Bool = false
+@Observable
+@MainActor
+final class AudioMeshManager {
+    var availableDevices: [AudioDeviceInfo] = []
+    var deviceSlots: [DeviceSlot] = []
+    var isActive: Bool = false
+    var statusMessage: String = "Ready"
+    var isError: Bool = false
+    var masterVolume: Float = 0.5
+    var isMuted: Bool = false
+    var isDucking: Bool = false
+    var duckLevel: Float = 0.3
+    var duckingEnabled: Bool = false
+    var duckDuration: TimeInterval = 3.0
+    var autoDuckingEnabled: Bool = false
 
     let engine = AudioEngine.shared
+    let batteryMonitor = BluetoothBatteryMonitor()
+    let presetManager = PresetManager()
     private let defaults = UserDefaults.standard
     private let devVolsKey = "deviceVolumes"
     private let slotOrderKey = "slotOrder"
     private let masterVolKey = "masterVolume"
-    private var preMuteVolume: Float = 0.5
-    private var devVols: [String: Float] = [:]
+    private let duckEnabledKey = "duckingEnabled"
+    private let duckLevelKey = "duckLevel"
+    private let duckDurationKey = "duckDuration"
+    private let duckAutoKey = "autoDuckingEnabled"
+    private let latencyOffsetKey = "latencyOffsets"
+    @ObservationIgnored private var preMuteVolume: Float = 0.5
+    @ObservationIgnored private var devVols: [String: Float] = [:]
+    @ObservationIgnored private var lastConnectedDeviceUIDs: Set<String> = []
+    @ObservationIgnored private var userStoppedSync = false
+    var latencyOffsets: [String: Int] = [:]
 
     init() {
         engine.onDeviceListChanged = { [weak self] in
-            guard let self else { return }
-            self.refreshDevices()
+            Task { @MainActor in
+                self?.refreshDevices()
+            }
         }
         engine.startMonitoring()
+        batteryMonitor.startMonitoring()
         refreshDevices()
         loadSaved()
+        setupDucking()
     }
 
     // MARK: - Device Slots
 
     func addSlot() {
-        deviceSlots.append(DeviceSlot(id: UUID(), device: nil, volume: masterVolume))
+        deviceSlots.append(DeviceSlot(id: UUID(), device: nil, volume: masterVolume, latencyOffset: 0))
     }
 
     func removeSlot(at index: Int) {
@@ -49,11 +70,29 @@ class AudioMeshManager: ObservableObject {
 
     func refreshDevices() {
         let all = engine.getAllOutputDevices()
+        let newUIDs = Set(all.map(\.uid))
+        let devicesChanged = newUIDs != lastConnectedDeviceUIDs
+        lastConnectedDeviceUIDs = newUIDs
         availableDevices = all
+
         for i in deviceSlots.indices {
             if let d = deviceSlots[i].device, !all.contains(d) {
                 deviceSlots[i].device = all.first { $0.uid == d.uid }
             }
+        }
+
+        if isActive {
+            let missing = deviceSlots.filter { $0.device == nil }
+            if !missing.isEmpty {
+                statusMessage = "Device disconnected"
+                stop()
+                return
+            }
+        }
+
+        if devicesChanged {
+            userStoppedSync = false
+            checkAutoPresets()
         }
     }
 
@@ -79,7 +118,7 @@ class AudioMeshManager: ObservableObject {
             isError = false
             // Let CoreAudio settle the aggregate device before setting volumes
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self else { return }
+                guard let self, engine.isRunning else { return }
                 applyAllVolumes()
                 isActive = true
                 let rate = devices[0].sampleRate
@@ -99,6 +138,7 @@ class AudioMeshManager: ObservableObject {
         isActive = false
         statusMessage = "Ready"
         isError = false
+        userStoppedSync = true
         saveDevices()
     }
 
@@ -142,10 +182,54 @@ class AudioMeshManager: ObservableObject {
         }
     }
 
+    // MARK: - Ducking
+
+    @ObservationIgnored private var preDuckVolume: Float = 0.5
+    @ObservationIgnored private var duckRestoreTimer: Timer?
+
+    func startDucking() {
+        guard !isDucking, duckingEnabled else { return }
+        preDuckVolume = masterVolume
+        isDucking = true
+        let target = min(masterVolume, duckLevel)
+        updateMasterVolume(target)
+
+        duckRestoreTimer?.invalidate()
+        duckRestoreTimer = Timer.scheduledTimer(withTimeInterval: duckDuration, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.stopDucking()
+            }
+        }
+    }
+
+    func stopDucking() {
+        guard isDucking else { return }
+        isDucking = false
+        duckRestoreTimer?.invalidate()
+        duckRestoreTimer = nil
+        updateMasterVolume(preDuckVolume)
+    }
+
+    private func setupDucking() {
+        engine.onAlertDeviceActivityChanged = { [weak self] running in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.autoDuckingEnabled, self.duckingEnabled else { return }
+                if running {
+                    self.startDucking()
+                }
+            }
+        }
+    }
+
     // MARK: - Cleanup
 
     func cleanup() {
         if isActive { stop() }
+        duckRestoreTimer?.invalidate()
+        duckRestoreTimer = nil
+        batteryMonitor.stopMonitoring()
         engine.stopMonitoring()
     }
 
@@ -166,6 +250,17 @@ class AudioMeshManager: ObservableObject {
         defaults.set(uids, forKey: slotOrderKey)
 
         defaults.set(Double(masterVolume), forKey: masterVolKey)
+        defaults.set(duckingEnabled, forKey: duckEnabledKey)
+        defaults.set(Double(duckLevel), forKey: duckLevelKey)
+        defaults.set(duckDuration, forKey: duckDurationKey)
+        defaults.set(autoDuckingEnabled, forKey: duckAutoKey)
+
+        for slot in deviceSlots {
+            if let uid = slot.device?.uid {
+                latencyOffsets[uid] = slot.latencyOffset
+            }
+        }
+        defaults.set(latencyOffsets, forKey: latencyOffsetKey)
     }
 
     private func loadSaved() {
@@ -179,11 +274,23 @@ class AudioMeshManager: ObservableObject {
             masterVolume = 0.5
         }
 
+        duckingEnabled = defaults.bool(forKey: duckEnabledKey)
+        if defaults.object(forKey: duckLevelKey) != nil {
+            duckLevel = Float(defaults.double(forKey: duckLevelKey))
+        }
+        if defaults.object(forKey: duckDurationKey) != nil {
+            duckDuration = defaults.double(forKey: duckDurationKey)
+        }
+        autoDuckingEnabled = defaults.bool(forKey: duckAutoKey)
+        if let saved = defaults.dictionary(forKey: latencyOffsetKey) as? [String: Int] {
+            latencyOffsets = saved
+        }
+
         let savedUIDs = defaults.array(forKey: slotOrderKey) as? [String] ?? []
         if savedUIDs.isEmpty {
             deviceSlots = [
-                DeviceSlot(id: UUID(), device: nil, volume: masterVolume),
-                DeviceSlot(id: UUID(), device: nil, volume: masterVolume),
+                DeviceSlot(id: UUID(), device: nil, volume: masterVolume, latencyOffset: 0),
+                DeviceSlot(id: UUID(), device: nil, volume: masterVolume, latencyOffset: 0),
             ]
             return
         }
@@ -192,10 +299,11 @@ class AudioMeshManager: ObservableObject {
         for uid in savedUIDs where !uid.isEmpty {
             let device = availableDevices.first(where: { $0.uid == uid })
             let vol = devVols[uid] ?? masterVolume
-            deviceSlots.append(DeviceSlot(id: UUID(), device: device, volume: vol > 0 ? vol : masterVolume))
+            let lat = latencyOffsets[uid] ?? 0
+            deviceSlots.append(DeviceSlot(id: UUID(), device: device, volume: vol > 0 ? vol : masterVolume, latencyOffset: lat))
         }
         while deviceSlots.count < 2 {
-            deviceSlots.append(DeviceSlot(id: UUID(), device: nil, volume: masterVolume))
+            deviceSlots.append(DeviceSlot(id: UUID(), device: nil, volume: masterVolume, latencyOffset: 0))
         }
     }
 
@@ -207,5 +315,76 @@ class AudioMeshManager: ObservableObject {
         } else if device != nil {
             deviceSlots[index].volume = masterVolume
         }
+    }
+
+    // MARK: - Battery
+
+    func battery(for deviceName: String, uid: String? = nil) -> DeviceBatteryInfo? {
+        if let uid {
+            let btAddress = uid
+                .replacingOccurrences(of: "MAC:", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "BT:", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "Bluetooth_", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespaces)
+            let isMac = btAddress.range(of: #"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"#, options: .regularExpression) != nil
+            if isMac, let match = batteryMonitor.deviceBatteries[btAddress] {
+                return match
+            }
+        }
+        return batteryMonitor.deviceBatteries.first { k, _ in
+            k.caseInsensitiveCompare(deviceName) == .orderedSame
+        }?.value
+    }
+
+    // MARK: - Presets
+
+    func saveCurrentPreset(name: String, autoSync: Bool = false) {
+        let uids = deviceSlots.compactMap { $0.device?.uid }
+        guard uids.count >= 2 else { return }
+        var vols: [String: Float] = [:]
+        var lats: [String: Int] = [:]
+        for slot in deviceSlots {
+            if let uid = slot.device?.uid {
+                vols[uid] = slot.volume
+                lats[uid] = slot.latencyOffset
+            }
+        }
+        presetManager.saveCurrent(name: name, deviceUIDs: uids, volumes: vols, latencyOffsets: lats, masterVolume: masterVolume, autoSync: autoSync)
+    }
+
+    func applyPreset(_ preset: Preset) {
+        var slots: [DeviceSlot] = []
+
+        // Try to find each device in the preset by UID
+        for uid in preset.deviceUIDs {
+            if let device = availableDevices.first(where: { $0.uid == uid }) {
+                let vol = preset.volumes[uid] ?? preset.masterVolume
+                let lat = preset.latencyOffsets[uid] ?? 0
+                slots.append(DeviceSlot(id: UUID(), device: device, volume: vol, latencyOffset: lat))
+                // Also update caches
+                devVols[uid] = vol
+                latencyOffsets[uid] = lat
+            }
+        }
+
+        // Fill remaining slots with empty ones (minimum 2)
+        while slots.count < 2 {
+            slots.append(DeviceSlot(id: UUID(), device: nil, volume: preset.masterVolume, latencyOffset: 0))
+        }
+
+        deviceSlots = slots
+        masterVolume = preset.masterVolume
+
+        if preset.autoSync && slots.allSatisfy({ $0.device != nil }) {
+            sync()
+        }
+    }
+
+    private func checkAutoPresets() {
+        guard !isActive, !userStoppedSync else { return }
+        guard presetManager.presets.contains(where: { $0.autoSync }) else { return }
+        let connectedUIDs = Set(availableDevices.map(\.uid))
+        guard let preset = presetManager.matchingPreset(for: connectedUIDs) else { return }
+        applyPreset(preset)
     }
 }

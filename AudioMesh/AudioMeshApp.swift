@@ -2,19 +2,19 @@ import SwiftUI
 
 @main
 struct AudioMeshApp: App {
-    @StateObject private var manager = AudioMeshManager()
+    @State private var manager = AudioMeshManager()
 
     var body: some Scene {
         WindowGroup("AudioMesh", id: "main") {
             ContentView()
-                .environmentObject(manager)
+                .environment(manager)
                 .onAppear { NSWindow.allowsAutomaticWindowTabbing = false }
         }
         .windowResizability(.contentSize)
 
         MenuBarExtra {
             MenuBarContentView()
-                .environmentObject(manager)
+                .environment(manager)
         } label: {
             Image(systemName: manager.isActive ? "headphones.circle.fill" : "headphones")
                 .foregroundStyle(manager.isActive ? Color.blue : .white)
@@ -26,11 +26,11 @@ struct AudioMeshApp: App {
 // MARK: - Menu Bar
 
 private struct MenuBarContentView: View {
-    @EnvironmentObject var manager: AudioMeshManager
+    @Environment(AudioMeshManager.self) private var manager
     @Environment(\.openWindow) private var openWindow
 
     private var connectedCount: Int {
-        manager.deviceSlots.compactMap(\.device).count
+        manager.deviceSlots.compactMap { $0.device }.count
     }
 
     private var canSync: Bool {
@@ -49,6 +49,7 @@ private struct MenuBarContentView: View {
 
             if manager.isActive {
                 masterVolumeRow
+                duckRow
             }
 
             syncRow
@@ -129,6 +130,11 @@ private struct MenuBarContentView: View {
                             Text(device.name)
                                 .font(.caption)
                                 .lineLimit(1)
+
+                            if device.isBluetooth, let battery = manager.battery(for: device.name, uid: device.uid) {
+                                batteryIndicator(battery)
+                            }
+
                             Spacer()
                             Text("\(Int(round(slot.volume * 100)))%")
                                 .font(.caption2.monospacedDigit())
@@ -148,6 +154,32 @@ private struct MenuBarContentView: View {
                     .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
+        }
+    }
+
+    // MARK: Battery Indicator
+
+    @ViewBuilder
+    private func batteryIndicator(_ info: DeviceBatteryInfo) -> some View {
+        let level = info.single ?? info.combined ?? info.left ?? info.right
+        if let l = level, l > 0 {
+            let icon: String = {
+                if l >= 75 { return "battery.100" }
+                if l >= 50 { return "battery.75" }
+                if l >= 25 { return "battery.50" }
+                return "battery.25"
+            }()
+            let color: Color = l >= 25 ? .secondary : .red
+
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(color)
+                Text("\(l)%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(color)
+            }
+            .help("Battery: \(l)%")
         }
     }
 
@@ -206,10 +238,54 @@ private struct MenuBarContentView: View {
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    // MARK: Duck Row
+
+    private var duckRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: manager.isDucking ? "speaker.wave.2.bubble.fill" : "speaker.wave.2")
+                .font(.caption2)
+                .foregroundStyle(manager.isDucking ? .orange : .secondary)
+                .frame(width: 14)
+
+            Toggle(isOn: Bindable(manager).duckingEnabled) {
+                EmptyView()
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+
+            Text("Ducking")
+                .font(.caption)
+                .foregroundStyle(manager.duckingEnabled ? .white : .secondary)
+
+            Spacer()
+
+            if manager.duckingEnabled {
+                Button(manager.isDucking ? "Restore" : "Duck") {
+                    manager.isDucking ? manager.stopDucking() : manager.startDucking()
+                }
+                .font(.caption2.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .tint(manager.isDucking ? .orange : .gray.opacity(0.5))
+                .controlSize(.small)
+
+                Text("\(Int(round(manager.duckLevel * 100)))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, alignment: .trailing)
+            }
+        }
+        .padding(9)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     // MARK: Sync
 
     private var syncRow: some View {
-        Button(action: manager.isActive ? manager.stop : manager.sync) {
+        Button(action: {
+            if canSync || manager.isActive {
+                if manager.isActive { manager.stop() } else { manager.sync() }
+            }
+        }) {
             HStack(spacing: 8) {
                 Image(systemName: manager.isActive ? "stop.fill" : "link")
                     .font(.caption.weight(.semibold))
@@ -224,6 +300,5 @@ private struct MenuBarContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .disabled(!canSync && !manager.isActive)
     }
 }
