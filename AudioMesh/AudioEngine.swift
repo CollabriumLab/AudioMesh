@@ -297,6 +297,9 @@ class AudioEngine {
         let block: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void) = { [weak self] _, _ in
             guard let self else { return }
             let running = self.isAlertDeviceRunning()
+            let currentAlertID = self.getSystemAlertDevice()
+            // Don't report when the alert device is our own aggregate device
+            guard currentAlertID != self.multiDeviceID else { return }
             DispatchQueue.main.async { self.onAlertDeviceActivityChanged?(running) }
         }
         alertListenerBlock = block
