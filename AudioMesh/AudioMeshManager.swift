@@ -40,6 +40,8 @@ final class AudioMeshManager {
     @ObservationIgnored private var devVols: [String: Float] = [:]
     @ObservationIgnored private var lastConnectedDeviceUIDs: Set<String> = []
     @ObservationIgnored private var userStoppedSync = false
+    @ObservationIgnored private var isSyncing = false
+    @ObservationIgnored private var suppressDuckingUntil: Date = .distantPast
     var latencyOffsets: [String: Int] = [:]
 
     init() {
@@ -100,6 +102,7 @@ final class AudioMeshManager {
     // MARK: - Sync / Stop
 
     func sync() {
+        guard !isSyncing else { return }
         let devices = deviceSlots.compactMap { $0.device }
         guard devices.count >= 2 else {
             statusMessage = "Select at least 2 devices"
@@ -113,13 +116,19 @@ final class AudioMeshManager {
             return
         }
 
+        isSyncing = true
+        // Suppress ducking during the sync settling period
+        suppressDuckingUntil = Date().addingTimeInterval(3)
+
         do {
             try engine.startGraph(devices: devices)
             statusMessage = "Syncing..."
             isError = false
             // Let CoreAudio settle the aggregate device before setting volumes
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self, engine.isRunning else { return }
+                guard let self else { return }
+                isSyncing = false
+                guard engine.isRunning else { return }
                 applyAllVolumes()
                 isActive = true
                 let rate = devices[0].sampleRate
@@ -128,6 +137,7 @@ final class AudioMeshManager {
             }
         } catch {
             engine.stopGraph()
+            isSyncing = false
             isActive = false
             statusMessage = error.localizedDescription
             isError = true
@@ -164,7 +174,9 @@ final class AudioMeshManager {
         }
     }
 
-    func updateMasterVolume(_ v: Float) {
+    @ObservationIgnored private var userChangedVolumeDuringDucking = false
+
+    private func _setMasterVolume(_ v: Float) {
         masterVolume = v
         for i in deviceSlots.indices {
             deviceSlots[i].volume = v
@@ -172,6 +184,11 @@ final class AudioMeshManager {
         if isActive {
             engine.setMasterVolume(volume: v)
         }
+    }
+
+    func updateMasterVolume(_ v: Float) {
+        if isDucking { userChangedVolumeDuringDucking = true }
+        _setMasterVolume(v)
     }
 
     private func applyAllVolumes() {
@@ -192,8 +209,9 @@ final class AudioMeshManager {
         guard !isDucking, duckingEnabled else { return }
         preDuckVolume = masterVolume
         isDucking = true
+        userChangedVolumeDuringDucking = false
         let target = min(masterVolume, duckLevel)
-        updateMasterVolume(target)
+        _setMasterVolume(target)
 
         duckRestoreTimer?.invalidate()
         duckRestoreTimer = Timer.scheduledTimer(withTimeInterval: duckDuration, repeats: false) { [weak self] _ in
@@ -209,19 +227,26 @@ final class AudioMeshManager {
         isDucking = false
         duckRestoreTimer?.invalidate()
         duckRestoreTimer = nil
-        // Respect user's volume changes made during ducking
-        let restoreVolume = max(masterVolume, preDuckVolume)
-        updateMasterVolume(restoreVolume)
+        if userChangedVolumeDuringDucking {
+            _setMasterVolume(masterVolume)
+        } else {
+            _setMasterVolume(preDuckVolume)
+        }
+        userChangedVolumeDuringDucking = false
     }
+
+    @ObservationIgnored private var lastAlertDeviceRunning = false
 
     private func setupDucking() {
         engine.onAlertDeviceActivityChanged = { [weak self] running in
             guard let self else { return }
             Task { @MainActor in
                 guard self.autoDuckingEnabled, self.duckingEnabled else { return }
-                if running {
+                guard Date() >= self.suppressDuckingUntil else { return }
+                if running && !self.lastAlertDeviceRunning {
                     self.startDucking()
                 }
+                self.lastAlertDeviceRunning = running
             }
         }
     }
@@ -384,7 +409,7 @@ final class AudioMeshManager {
     }
 
     private func checkAutoPresets() {
-        guard !isActive, !userStoppedSync else { return }
+        guard !isActive, !userStoppedSync, !isSyncing else { return }
         guard presetManager.presets.contains(where: { $0.autoSync }) else { return }
         let connectedUIDs = Set(availableDevices.map(\.uid))
         guard let preset = presetManager.matchingPreset(for: connectedUIDs) else { return }

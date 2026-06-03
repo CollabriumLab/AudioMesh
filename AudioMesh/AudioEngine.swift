@@ -28,6 +28,10 @@ class AudioEngine {
     // Sub-device tracking for per-device volume control
     private var subDeviceIDs: [AudioDeviceID] = []
 
+    func isSubDevice(_ id: AudioDeviceID) -> Bool {
+        subDeviceIDs.contains(id)
+    }
+
     // MARK: - Public API
 
     func startGraph(devices: [AudioDeviceInfo]) throws {
@@ -90,6 +94,10 @@ class AudioEngine {
         } else {
             debugLog("FAILED to set multi-output device as default")
         }
+
+        // Re-register alert device listener in case the alert device changed
+        stopAlertMonitoring()
+        startAlertMonitoring()
 
         // Save UID so we can destroy it later
         multiDeviceUID = uid
@@ -283,10 +291,12 @@ class AudioEngine {
 
     var onAlertDeviceActivityChanged: ((Bool) -> Void)?
     private var alertListenerBlock: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void)?
+    private var monitoredAlertDeviceID: AudioDeviceID = 0
 
     func startAlertMonitoring() {
         let alertID = getSystemAlertDevice()
         guard alertID != 0 else { return }
+        monitoredAlertDeviceID = alertID
 
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
@@ -294,12 +304,16 @@ class AudioEngine {
             mElement: kAudioObjectPropertyElementMain
         )
 
-        let block: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void) = { [weak self] _, _ in
+        let block: (@convention(block) (UInt32, UnsafePointer<AudioObjectPropertyAddress>) -> Void) = { [weak self] objectID, _ in
             guard let self else { return }
+            // Ignore callbacks triggered by our own aggregate or sub-devices
+            guard objectID != self.multiDeviceID,
+                  !self.isSubDevice(objectID) else { return }
             let running = self.isAlertDeviceRunning()
             let currentAlertID = self.getSystemAlertDevice()
-            // Don't report when the alert device is our own aggregate device
-            guard currentAlertID != self.multiDeviceID else { return }
+            // Don't report when the alert device is our own aggregate device or any sub-device
+            guard currentAlertID != self.multiDeviceID,
+                  !self.isSubDevice(currentAlertID) else { return }
             DispatchQueue.main.async { self.onAlertDeviceActivityChanged?(running) }
         }
         alertListenerBlock = block
@@ -308,7 +322,7 @@ class AudioEngine {
 
     func stopAlertMonitoring() {
         guard let block = alertListenerBlock else { return }
-        let alertID = getSystemAlertDevice()
+        let alertID = monitoredAlertDeviceID
         guard alertID != 0 else { return }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
@@ -317,6 +331,7 @@ class AudioEngine {
         )
         AudioObjectRemovePropertyListenerBlock(alertID, &address, .main, block)
         alertListenerBlock = nil
+        monitoredAlertDeviceID = 0
     }
 
     private func getSystemAlertDevice() -> AudioDeviceID {
