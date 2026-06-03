@@ -209,7 +209,9 @@ final class AudioMeshManager {
         isDucking = false
         duckRestoreTimer?.invalidate()
         duckRestoreTimer = nil
-        updateMasterVolume(preDuckVolume)
+        // Respect user's volume changes made during ducking
+        let restoreVolume = max(masterVolume, preDuckVolume)
+        updateMasterVolume(restoreVolume)
     }
 
     private func setupDucking() {
