@@ -1,22 +1,40 @@
 # AudioMesh
 
-Route macOS system audio to multiple Bluetooth headphones simultaneously using a CoreAudio multi-output aggregate device.
+![AudioMesh logo](AudioMesh/Assets.xcassets/AppIcon.appiconset/icon_512x512.png)
 
-## How it works
+AudioMesh lets you play the same sound from your Mac to multiple Bluetooth headphones or speakers at once.
 
-Creates a stacked multi-output device via `AudioHardwareCreateAggregateDevice` and sets it as the system default output. Audio is cloned to all connected Bluetooth devices with per-device and master volume control.
+Example: one laptop, two pairs of headphones, everyone hears the same movie or music.
 
-## Usage
+## What it does
 
-1. Connect two or more Bluetooth headphones/speakers
-2. Select them in the device slots
-3. Click **Sync** — a multi-output device is created and set as default
-4. Adjust master or per-device volume with the sliders
-5. Click **Stop** to restore the original output device
+- Sends your Mac audio to multiple Bluetooth devices at the same time
+- Lets you control each device volume
+- Also gives you one master volume control
+- Remembers volume levels for your devices
 
-Volumes are persisted per-device by UID — swapping devices between slots preserves their saved levels.
+## How to use
+
+1. Connect at least 2 Bluetooth headphones/speakers to your Mac.
+2. Open AudioMesh.
+3. Pick your devices in the app.
+4. Click **Sync** to start shared playback.
+5. Adjust volume if needed.
+6. Click **Stop** when done to go back to normal output.
+
+## If macOS blocks the app the first time
+
+If you see a warning that the app can't be opened, do this:
+
+1. Try opening AudioMesh once (so macOS shows the warning).
+2. Open **System Settings**.
+3. Go to **Privacy & Security**.
+4. Scroll down to the security message about AudioMesh.
+5. Click **Open Anyway**.
+6. Confirm by clicking **Open** in the popup.
+7. Open AudioMesh again.
 
 ## Requirements
 
-- macOS 14+
-- Two or more Bluetooth audio output devices
+- macOS 14 or newer
+- 2 or more Bluetooth audio devices
