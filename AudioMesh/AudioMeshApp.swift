@@ -19,7 +19,8 @@ struct AudioMeshApp: App {
                     }
                 }
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 820, height: 540)
+        .windowResizability(.contentMinSize)
 
         MenuBarExtra {
             MenuBarContentView()

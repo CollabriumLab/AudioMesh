@@ -23,35 +23,40 @@ struct ContentView: View {
     @Environment(AudioMeshManager.self) private var manager
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                HeaderView()
+        ZStack {
+            bg
+                .ignoresSafeArea()
 
-                if !manager.deviceSlots.isEmpty {
-                    deviceSection
+            ScrollView {
+                VStack(spacing: 14) {
+                    HeaderView()
+
+                    if !manager.deviceSlots.isEmpty {
+                        deviceSection
+                    }
+
+                    AddDeviceRow { manager.addSlot() }
+
+                    if manager.deviceSlots.filter({ $0.device != nil }).count >= 2 {
+                        SyncSection()
+                    }
+
+                    if manager.isActive {
+                        MasterVolumeSection()
+                        DuckingSection()
+                    }
+
+                    PresetsSection()
+
+                    GlassDivider()
+
+                    StatusBarView()
                 }
-
-                AddDeviceRow { manager.addSlot() }
-
-                if manager.deviceSlots.filter({ $0.device != nil }).count >= 2 {
-                    SyncSection()
-                }
-
-                if manager.isActive {
-                    MasterVolumeSection()
-                    DuckingSection()
-                }
-
-                PresetsSection()
-
-                GlassDivider()
-
-                StatusBarView()
+                .padding(16)
+                .frame(maxWidth: 700)
             }
-            .padding(16)
         }
-        .frame(minWidth: 580, idealWidth: 620, maxWidth: 700, minHeight: 500, idealHeight: 650)
-        .background(bg)
+        .frame(minWidth: 580, idealWidth: 620, minHeight: 340, idealHeight: 520)
     }
 
     private var deviceSection: some View {
